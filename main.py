@@ -4,6 +4,7 @@
 """
 import os
 import time
+import logging
 from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException, Query
@@ -13,15 +14,32 @@ import xml.etree.ElementTree as ET
 from config import config
 from crypto import WeChatWorkCrypto
 
+# 配置日志
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI(title="企业微信消息接收接口", version="1.0.0")
 
 # 初始化加解密实例
-crypto = WeChatWorkCrypto(
-    token=config.token,
-    encoding_aes_key=config.encoding_aes_key,
-    corp_id=config.corp_id
-)
+logger.info("正在初始化企业微信加解密实例...")
+logger.info(f"Token: {config.token}")
+logger.info(f"EncodingAESKey: {config.encoding_aes_key}")
+logger.info(f"CorpID: {config.corp_id}")
+
+try:
+    crypto = WeChatWorkCrypto(
+        token=config.token,
+        encoding_aes_key=config.encoding_aes_key,
+        corp_id=config.corp_id
+    )
+    logger.info("企业微信加解密实例初始化成功")
+except Exception as e:
+    logger.error(f"企业微信加解密实例初始化失败: {e}")
+    raise
 
 
 @app.get("/")
@@ -35,16 +53,27 @@ async def verify_url(
     验证URL有效性
     企业微信会发送GET请求到这个接口进行URL验证
     """
+    logger.info("=== URL验证请求开始 ===")
+    logger.info(f"msg_signature: {msg_signature}")
+    logger.info(f"timestamp: {timestamp}")
+    logger.info(f"nonce: {nonce}")
+    logger.info(f"echostr: {echostr}")
+    
     try:
         # 验证URL并解密echostr
+        logger.info("开始验证URL并解密echostr...")
         decrypted_msg = crypto.verify_url(msg_signature, timestamp, nonce, echostr)
+        logger.info(f"解密成功，明文内容: {decrypted_msg}")
         
         # 原样返回明文消息内容（不能加引号，不能带bom头，不能带换行符）
+        logger.info("返回解密后的明文内容")
         return PlainTextResponse(content=decrypted_msg)
         
     except ValueError as e:
+        logger.error(f"URL验证失败: {str(e)}")
         raise HTTPException(status_code=400, detail=f"URL verification failed: {str(e)}")
     except Exception as e:
+        logger.error(f"URL验证内部错误: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -54,21 +83,31 @@ async def receive_message(request: Request):
     接收企业微信推送的消息
     企业微信会发送POST请求到这个接口推送消息
     """
+    logger.info("=== 消息接收请求开始 ===")
+    
     try:
         # 获取查询参数
         msg_signature = request.query_params.get("msg_signature")
         timestamp = request.query_params.get("timestamp")
         nonce = request.query_params.get("nonce")
         
+        logger.info(f"查询参数 - msg_signature: {msg_signature}")
+        logger.info(f"查询参数 - timestamp: {timestamp}")
+        logger.info(f"查询参数 - nonce: {nonce}")
+        
         if not all([msg_signature, timestamp, nonce]):
+            logger.error("缺少必要的查询参数")
             raise HTTPException(status_code=400, detail="Missing required query parameters")
         
         # 获取POST数据
         post_data = await request.body()
         post_data_str = post_data.decode('utf-8')
+        logger.info(f"POST数据: {post_data_str}")
         
         # 解密消息
+        logger.info("开始解密消息...")
         decrypted_msg = crypto.decrypt_msg(msg_signature, timestamp, nonce, post_data_str)
+        logger.info(f"解密成功，明文内容: {decrypted_msg}")
         
         # 解析解密后的XML消息
         msg_root = ET.fromstring(decrypted_msg)
@@ -199,4 +238,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8010)

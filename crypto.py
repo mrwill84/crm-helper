@@ -5,6 +5,7 @@
 import base64
 import hashlib
 import hmac
+import logging
 import random
 import string
 import struct
@@ -14,6 +15,9 @@ from urllib.parse import unquote
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 import xml.etree.ElementTree as ET
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 
 class WeChatWorkCrypto:
@@ -168,18 +172,32 @@ class WeChatWorkCrypto:
         Raises:
             ValueError: 签名验证失败或解密失败
         """
+        logger.info("=== 开始URL验证 ===")
+        logger.info(f"输入参数 - msg_signature: {msg_signature}")
+        logger.info(f"输入参数 - timestamp: {timestamp}")
+        logger.info(f"输入参数 - nonce: {nonce}")
+        logger.info(f"输入参数 - echostr: {echostr}")
+        
         # 对echostr进行URL解码
         echostr_decoded = unquote(echostr)
+        logger.info(f"URL解码后的echostr: {echostr_decoded}")
         
         # 验证签名
+        logger.info("开始验证签名...")
         if not self._verify_signature(msg_signature, timestamp, nonce, echostr_decoded):
+            logger.error("签名验证失败")
             raise ValueError("Signature verification failed")
+        logger.info("签名验证成功")
         
         # Base64解码
+        logger.info("开始Base64解码...")
         encrypted_data = base64.b64decode(echostr_decoded)
+        logger.info(f"Base64解码成功，数据长度: {len(encrypted_data)}")
         
         # AES解密
+        logger.info("开始AES解密...")
         decrypted_data = self._aes_decrypt(encrypted_data)
+        logger.info(f"AES解密成功，数据长度: {len(decrypted_data)}")
         
         # 解析解密后的数据
         # 格式: random(16B) + msg_len(4B) + msg + receiveid
@@ -188,11 +206,20 @@ class WeChatWorkCrypto:
         msg = decrypted_data[20:20+msg_len]
         receiveid = decrypted_data[20+msg_len:]
         
+        logger.info(f"解析数据 - random_bytes长度: {len(random_bytes)}")
+        logger.info(f"解析数据 - msg_len: {msg_len}")
+        logger.info(f"解析数据 - msg: {msg.decode('utf-8')}")
+        logger.info(f"解析数据 - receiveid: {receiveid.decode('utf-8')}")
+        
         # 验证receiveid
         if receiveid.decode('utf-8') != self.corp_id:
+            logger.error(f"receiveid验证失败: {receiveid.decode('utf-8')} != {self.corp_id}")
             raise ValueError(f"Invalid receiveid: {receiveid.decode('utf-8')}, expected: {self.corp_id}")
+        logger.info("receiveid验证成功")
         
-        return msg.decode('utf-8')
+        result = msg.decode('utf-8')
+        logger.info(f"URL验证完成，返回结果: {result}")
+        return result
     
     def decrypt_msg(self, msg_signature: str, timestamp: str, nonce: str, post_data: str) -> str:
         """
